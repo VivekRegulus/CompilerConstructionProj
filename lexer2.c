@@ -1,3 +1,95 @@
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <ctype.h>
+#include <stdbool.h>
+#include "lexer.h"
+
+/* ========================================================= */
+/*                    TWIN BUFFER CODE                       */
+/* ========================================================= */
+
+twinBuffer initBaseBuffer(FILE *fp)
+{
+    twinBuffer B = malloc(sizeof(struct TwinBufferStruct));
+    B->fp = fp;
+    B->currentBuff = 1;
+    B->forward = 0;
+
+    B->bytesRead1 = fread(B->buf1, 1, BUFFER_SIZE, fp);
+    B->bytesRead2 = 0;
+
+    B->eof_reached = (B->bytesRead1 < BUFFER_SIZE);
+    return B;
+}
+
+char getNextChar(twinBuffer B)
+{
+    if (B->currentBuff == 1) {
+        if (B->forward < B->bytesRead1)
+            return B->buf1[B->forward++];
+
+        B->bytesRead2 = fread(B->buf2, 1, BUFFER_SIZE, B->fp);
+        B->currentBuff = 2;
+        B->forward = 0;
+
+        if (B->bytesRead2 == 0)
+            return EOF;
+
+        return B->buf2[B->forward++];
+    }
+    else {
+        if (B->forward < B->bytesRead2)
+            return B->buf2[B->forward++];
+
+        B->bytesRead1 = fread(B->buf1, 1, BUFFER_SIZE, B->fp);
+        B->currentBuff = 1;
+        B->forward = 0;
+
+        if (B->bytesRead1 == 0)
+            return EOF;
+
+        return B->buf1[B->forward++];
+    }
+}
+
+void retractChar(twinBuffer B)
+{
+    if (B->forward > 0)
+        B->forward--;
+    else {
+        B->currentBuff = (B->currentBuff == 1) ? 2 : 1;
+        B->forward = BUFFER_SIZE - 1;
+    }
+}
+
+/* ========================================================= */
+/*                    HELPER FUNCTIONS                       */
+/* ========================================================= */
+
+bool isKeyword(const char *str, TokenType *outType)
+{
+    if (strcmp(str, "with") == 0)        { *outType = TK_WITH; return true; }
+    if (strcmp(str, "parameters") == 0)  { *outType = TK_PARAMETERS; return true; }
+    if (strcmp(str, "end") == 0)         { *outType = TK_END; return true; }
+    if (strcmp(str, "while") == 0)       { *outType = TK_WHILE; return true; }
+    if (strcmp(str, "if") == 0)          { *outType = TK_IF; return true; }
+    if (strcmp(str, "then") == 0)        { *outType = TK_THEN; return true; }
+    if (strcmp(str, "endif") == 0)       { *outType = TK_ENDIF; return true; }
+    if (strcmp(str, "read") == 0)        { *outType = TK_READ; return true; }
+    if (strcmp(str, "write") == 0)       { *outType = TK_WRITE; return true; }
+    if (strcmp(str, "return") == 0)      { *outType = TK_RETURN; return true; }
+    if (strcmp(str, "int") == 0)         { *outType = TK_INT; return true; }
+    if (strcmp(str, "real") == 0)        { *outType = TK_REAL; return true; }
+    return false;
+}
+
+/* ========================================================= */
+/*                  DFA-BASED LEXER                          */
+/* ========================================================= */
+
+int currentLineNumber = 1;
+
 tokenInfo getNextToken(twinBuffer B)
 {
     tokenInfo ti = malloc(sizeof(token_info));
@@ -32,13 +124,19 @@ tokenInfo getNextToken(twinBuffer B)
 
         switch (state) {
 
-        /* ---------------- START STATE ---------------- */
         case ST_START:
             if (c == ' ' || c == '\t' || c == '\r')
                 break;
 
             if (c == '\n') {
                 currentLineNumber++;
+                break;
+            }
+
+            if (c == EOF) {
+                ti->tokenType = TK_EOF;
+                strcpy(ti->lexeme, "EOF");
+                state = ST_DONE;
                 break;
             }
 
@@ -61,12 +159,6 @@ tokenInfo getNextToken(twinBuffer B)
             else if (c == '-') { ti->tokenType = TK_MINUS; state = ST_DONE; }
             else if (c == '*') { ti->tokenType = TK_MUL;   state = ST_DONE; }
             else if (c == '/') { ti->tokenType = TK_DIV;   state = ST_DONE; }
-            else if (c == '(') { ti->tokenType = TK_OP;    state = ST_DONE; }
-            else if (c == ')') { ti->tokenType = TK_CL;    state = ST_DONE; }
-            else if (c == '[') { ti->tokenType = TK_SQL;   state = ST_DONE; }
-            else if (c == ']') { ti->tokenType = TK_SQR;   state = ST_DONE; }
-            else if (c == ';') { ti->tokenType = TK_SEM;   state = ST_DONE; }
-            else if (c == ',') { ti->tokenType = TK_COMMA; state = ST_DONE; }
             else {
                 fprintf(stderr,
                         "Line %d : Error: Unknown symbol <%c>\n",
@@ -76,7 +168,6 @@ tokenInfo getNextToken(twinBuffer B)
             }
             break;
 
-        /* ---------------- IDENTIFIER / KEYWORD ---------------- */
         case ST_ID:
             if (c >= 'a' && c <= 'z') {
                 ti->lexeme[lex_len++] = c;
@@ -92,7 +183,6 @@ tokenInfo getNextToken(twinBuffer B)
             }
             break;
 
-        /* ---------------- FUNCTION IDENTIFIER ---------------- */
         case ST_FUNID:
             if (isalnum(c)) {
                 ti->lexeme[lex_len++] = c;
@@ -101,18 +191,12 @@ tokenInfo getNextToken(twinBuffer B)
                 retractChar(B);
                 if (strcmp(ti->lexeme, "_main") == 0)
                     ti->tokenType = TK_MAIN;
-                else if (lex_len > 30) {
-                    fprintf(stderr,
-                            "Line %d: Function identifier too long\n",
-                            currentLineNumber);
-                    ti->tokenType = TK_ERROR;
-                } else
+                else
                     ti->tokenType = TK_FUNID;
                 state = ST_DONE;
             }
             break;
 
-        /* ---------------- RUID ---------------- */
         case ST_RUID:
             if (c >= 'a' && c <= 'z') {
                 ti->lexeme[lex_len++] = c;
@@ -124,7 +208,6 @@ tokenInfo getNextToken(twinBuffer B)
             }
             break;
 
-        /* ---------------- INTEGER ---------------- */
         case ST_NUM:
             if (isdigit(c)) {
                 ti->lexeme[lex_len++] = c;
@@ -140,7 +223,6 @@ tokenInfo getNextToken(twinBuffer B)
             }
             break;
 
-        /* ---------------- REAL NUMBER ---------------- */
         case ST_RNUM:
             if (isdigit(c)) {
                 ti->lexeme[lex_len++] = c;
@@ -152,115 +234,18 @@ tokenInfo getNextToken(twinBuffer B)
             }
             break;
 
-        /* ---------------- <, <=, <--- ---------------- */
-        case ST_LT:
-            if (c == '=') {
-                ti->lexeme[lex_len++] = c;
-                ti->tokenType = TK_LE;
-                state = ST_DONE;
-            } else if (c == '-') {
-                ti->lexeme[lex_len++] = c;
-                state = ST_ASSIGNOP;
-            } else {
-                retractChar(B);
-                ti->tokenType = TK_LT;
-                state = ST_DONE;
-            }
-            break;
-
-        case ST_ASSIGNOP:
-            if (c == '-' && getNextChar(B) == '-') {
-                ti->lexeme[lex_len++] = '-';
-                ti->lexeme[lex_len++] = '-';
-                ti->tokenType = TK_ASSIGNOP;
-            } else {
-                fprintf(stderr,
-                        "Line %d : Error: Invalid assignment operator\n",
-                        currentLineNumber);
-                ti->tokenType = TK_ERROR;
-            }
-            state = ST_DONE;
-            break;
-
-        /* ---------------- >, >= ---------------- */
-        case ST_GT:
-            if (c == '=') {
-                ti->lexeme[lex_len++] = c;
-                ti->tokenType = TK_GE;
-            } else {
-                retractChar(B);
-                ti->tokenType = TK_GT;
-            }
-            state = ST_DONE;
-            break;
-
-        /* ---------------- == ---------------- */
-        case ST_EQ:
-            if (c == '=') {
-                ti->lexeme[lex_len++] = c;
-                ti->tokenType = TK_EQ;
-            } else {
-                retractChar(B);
-                fprintf(stderr,
-                        "Line %d : Error: Invalid '='\n",
-                        currentLineNumber);
-                ti->tokenType = TK_ERROR;
-            }
-            state = ST_DONE;
-            break;
-
-        /* ---------------- != ---------------- */
-        case ST_NE:
-            if (c == '=') {
-                ti->lexeme[lex_len++] = c;
-                ti->tokenType = TK_NE;
-            } else {
-                retractChar(B);
-                fprintf(stderr,
-                        "Line %d : Error: Invalid '!'\n",
-                        currentLineNumber);
-                ti->tokenType = TK_ERROR;
-            }
-            state = ST_DONE;
-            break;
-
-        /* ---------------- &&& ---------------- */
-        case ST_AND:
-            if (c == '&' && getNextChar(B) == '&')
-                ti->tokenType = TK_AND;
-            else {
-                fprintf(stderr,
-                        "Line %d : Error: Invalid AND operator\n",
-                        currentLineNumber);
-                ti->tokenType = TK_ERROR;
-            }
-            state = ST_DONE;
-            break;
-
-        /* ---------------- @@@ ---------------- */
-        case ST_OR:
-            if (c == '@' && getNextChar(B) == '@')
-                ti->tokenType = TK_OR;
-            else {
-                fprintf(stderr,
-                        "Line %d : Error: Invalid OR operator\n",
-                        currentLineNumber);
-                ti->tokenType = TK_ERROR;
-            }
-            state = ST_DONE;
-            break;
-
-        /* ---------------- COMMENT (SKIPPED) ---------------- */
         case ST_COMMENT:
             while (c != '\n' && c != EOF)
                 c = getNextChar(B);
-
             if (c == '\n')
                 currentLineNumber++;
-
             lex_len = 0;
             state = ST_START;
             break;
+
+        default:
+            ti->tokenType = TK_ERROR;
+            state = ST_DONE;
         }
     }
 
