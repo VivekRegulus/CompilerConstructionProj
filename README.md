@@ -1,53 +1,108 @@
-Compiler Construction Project 
-Overview
-This repository contains the implementation of Stage 1 for the Compiler Construction project. It includes a fully functional Lexical Analyzer and a Table-Driven LL(1) Syntax Analyzer (Parser) built from scratch in C. The compiler processes a custom procedural programming language, validates its syntax against a strict LL(1) grammar, and generates an N-ary Parse Tree.
+# Compiler Construction Project
 
-Key Features
-Lexical Analysis (DFA-based): Implements a highly efficient Lexer using a Twin Buffer mechanism (BUFFER_SIZE = 50) to minimize disk I/O overhead. It strictly enforces custom regex constraints for identifiers, fields, records, and real numbers.
+## Overview
 
-Syntax Analysis (LL(1) Predictive Parser): Uses a stack-based predictive parsing algorithm driven by pre-computed FIRST and FOLLOW sets.
+This repository contains the implementation of **Stage 1** for the Compiler Construction project. It features a fully functional **Lexical Analyzer (Lexer)** and a **Table-Driven LL(1) Syntax Analyzer (Parser)** built entirely from scratch in C.
 
-Robust Error Recovery (Panic Mode): Incorporates textbook LL(1) Panic Mode recovery. It uses synchronization tokens (;, end, endif, endwhile, etc.) to gracefully discard invalid token sequences, suppress cascading errors, and resume parsing without crashing.
+The compiler processes source code written in a custom procedural programming language, validates its syntax against a strict LL(1) grammar, and dynamically generates an N-ary Parse Tree.
 
-N-ary Parse Tree Generation: Dynamically builds an Abstract Syntax Tree (AST) using a "First-Child / Next-Sibling" pointer architecture. The tree is exported using an In-Order traversal strictly matching the required 7-column format.
+---
 
-Performance Tracking: Includes an execution time measurement module using CPU clock ticks.
+## Key Features
 
-File Structure
-driver.c: Contains the main menu loop and file I/O handling.
+### 🔹 Lexical Analysis (DFA-based)
 
-lexer.c / lexer.h / lexerDef.h: Contains the Twin Buffer logic, DFA state machine, and token generation.
+* Implements a highly efficient Lexer using a **Twin Buffer** architecture (`BUFFER_SIZE = 50`) to minimize disk I/O overhead.
+* Strictly enforces custom regex constraints for:
 
-parser.c / parser.h / parserDef.h: Contains the Stack ADT, Tree Node ADT, LL(1) Parse Table, Parsing Engine, and Tree printing logic.
+  * regular variables (`TK_ID`)
+  * record fields (`TK_FIELDID`)
+  * record names (`TK_RUID`)
+  * real numbers (`TK_RNUM`)
 
-makefile: Automated build script.
+### 🔹 Syntax Analysis (LL(1) Predictive Parser)
 
-t1.txt - t10.txt: Comprehensive test cases (both valid and erroneous) to test the compiler's resilience.
+* Uses a stack-based predictive parsing engine driven by pre-computed `FIRST` and `FOLLOW` sets.
 
-How to Build & Run
-1. Compile the Project:
-Ensure you have gcc and make installed. Run the following command in the terminal:
+### 🔹 Robust Error Recovery (Panic Mode)
 
-Bash
+* Incorporates textbook LL(1) Panic Mode recovery using synchronization tokens (`;`, `end`, `endif`, `endwhile`).
+* Gracefully discards invalid token sequences.
+* Suppresses cascading/duplicate errors.
+* Tracks line numbers accurately across multi-line statements.
+
+### 🔹 N-ary Parse Tree Generation
+
+* Dynamically builds an Abstract Syntax Tree (AST) using a **First-Child / Next-Sibling** pointer architecture.
+* Exports the tree using **In-Order traversal**
+  *(Leftmost child → Parent → Remaining siblings)*.
+* Output strictly matches the required 7-column tabular format.
+
+### 🔹 Performance Tracking
+
+* Includes execution time measurement using CPU clock ticks.
+
+---
+
+## File Structure
+
+| File                 | Description                                           |
+| -------------------- | ----------------------------------------------------- |
+| `driver.c`           | Main interactive menu loop and file I/O handling      |
+| `lexer.c/.h/Def.h`   | Twin Buffer, DFA state machine, token generation      |
+| `parser.c/.h/Def.h`  | Stack ADT, Tree Node ADT, Parse Table, Parsing Engine |
+| `makefile`           | Automated build script                                |
+| `t1.txt` – `t10.txt` | Test cases (valid and erroneous)                      |
+
+---
+
+## How to Build & Run
+
+### 1. Compile the Project
+
+Ensure `gcc` and `make` are installed. From the project directory:
+
+```bash
 make clean
 make
-2. Execute the Compiler:
-Run the generated executable, providing a source code text file and an output file for the parse tree:
+```
 
-Bash
+---
+
+### 2. Execute the Compiler
+
+Run the generated executable:
+
+```bash
 ./stage1exe t1.txt parsetreeOutFile.txt
-3. Main Menu Options:
-Upon running, the driver will present the following menu:
+```
 
-Option 0: Exit the program.
+---
 
-Option 1: Strip comments (%) from the source file and print the clean code to the console.
+## Main Menu Options
 
-Option 2: Run the Lexical Analyzer and print the generated Token Stream.
+| Option | Description                                 |
+| ------ | ------------------------------------------- |
+| **0**  | Exit the compiler                           |
+| **1**  | Remove comments (`%`) and print clean code  |
+| **2**  | Run lexical analysis and print token stream |
+| **3**  | Run syntax analysis and generate parse tree |
+| **4**  | Display total CPU execution time            |
 
-Option 3: Run the Syntax Analyzer, print any lexical/syntax errors, and output the generated Parse Tree to the provided output file.
+---
 
-Option 4: Measure and print the total CPU execution time taken by the Lexer and Parser combined.
+## Error Handling
 
-Error Handling
-The compiler explicitly handles both Lexical Errors (e.g., unknown symbols, variable names exceeding character limits) and Syntax Errors (e.g., terminal/non-terminal mismatches). Errors are printed sequentially to the console with accurate line numbers, even when statements cross multiple lines.
+The compiler explicitly handles both:
+
+* **Lexical Errors**
+
+  * unknown symbols
+  * identifier length violations
+
+* **Syntax Errors**
+
+  * terminal mismatches
+  * non-terminal mismatches
+
+Errors are reported sequentially with accurate line numbers—even for multi-line statements—without crashing the program.
