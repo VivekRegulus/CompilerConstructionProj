@@ -5,7 +5,7 @@
 #include <string.h>
 #include "lexerDef.h"
 
-/* ================= FUNCTION PROTOTYPES ================= */
+// FUNCTION PROTOTYPES
 
 FILE *getStream(FILE *fp, twinBuffer B);
 twinBuffer initBuffer(FILE *fp);

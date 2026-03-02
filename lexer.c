@@ -12,7 +12,7 @@
 #include <stdbool.h>
 #include "lexer.h"
 
-/* token name lookup - same order as the enum */
+// token name lookup - using same order as the enum
 const char *tokenStrings[] = {
     "TK_ASSIGNOP", "TK_COMMENT", "TK_FIELDID", "TK_ID", "TK_NUM", "TK_RNUM",
     "TK_FUNID", "TK_RUID", "TK_WITH", "TK_PARAMETERS", "TK_END", "TK_WHILE",
@@ -27,19 +27,10 @@ const char *tokenStrings[] = {
 
 int lineNumber = 1;
 
-/* ========================================================= */
-/*              TWIN BUFFER IMPLEMENTATION                   */
-/* ========================================================= */
 
-/*
- * getStream - Efficiently populates the twin buffer by reading a fixed-size
- * piece of source code from the file into the current buffer half.
- * This avoids mixing intensive I/O operations with CPU-intensive lexical
- * analysis. The file pointer is maintained after every access so that
- * more data can be fetched into memory on demand.
- *
- * Returns the FILE pointer (advanced past the bytes just read).
- */
+
+ // TWIN BUFFER IMPLEMENTATION
+
 FILE *getStream(FILE *fp, twinBuffer B)
 {
     if (B->currentBuff == 1) {
@@ -66,24 +57,20 @@ twinBuffer initBuffer(FILE *fp)
     B->bytesRead2 = 0;
     B->eof_reached = false;
 
-    /* load first buffer half using getStream */
+    //loading first buffer half using getStream 
     getStream(fp, B);
 
     return B;
 }
 
-/*
- * getNextChar - returns the next character from the twin buffer.
- * When the current buffer is exhausted, loads the other half from file.
- * Returns EOF when there's nothing left to read.
- */
+
 char getNextChar(twinBuffer B)
 {
     if (B->currentBuff == 1) {
         if (B->forward < B->bytesRead1) {
             return B->buf1[B->forward++];
         }
-        /* buf1 exhausted - switch to buf2 and use getStream to load it */
+        // If buffer 1 is exhausted, switching to buffer2
         B->currentBuff = 2;
         B->forward = 0;
         getStream(B->fp, B);
@@ -97,7 +84,7 @@ char getNextChar(twinBuffer B)
         if (B->forward < B->bytesRead2) {
             return B->buf2[B->forward++];
         }
-        /* buf2 exhausted - switch to buf1 and use getStream to reload it */
+        // If buffer 2 is exhausted, switching to buffer1 
         B->currentBuff = 1;
         B->forward = 0;
         getStream(B->fp, B);
@@ -109,17 +96,14 @@ char getNextChar(twinBuffer B)
     }
 }
 
-/*
- * retractChar - moves the forward pointer back by one character.
- * Handles the case when we need to cross back to the other buffer half.
- */
+
+// moves forward pointer back by one character
 void retractChar(twinBuffer B)
 {
     if (B->forward > 0) {
         B->forward--;
     }
     else {
-        /* need to go back to the other buffer */
         if (B->currentBuff == 1) {
             B->currentBuff = 2;
             B->forward = B->bytesRead2 - 1;
@@ -130,18 +114,13 @@ void retractChar(twinBuffer B)
     }
 }
 
-/* ========================================================= */
-/*                  KEYWORD LOOKUP                           */
-/* ========================================================= */
 
-/*
- * checkKeyword - checks if a string matches any language keyword.
- * If it does, sets *out to the corresponding token type and returns true.
- * Simple linear search - good enough for our small keyword set.
- */
+// KEYWORD LOOKUP                          
+
+//checks if string matches any language keyword
 static bool checkKeyword(const char *str, TokenType *out)
 {
-    /* I tried using a hash table but this was simpler and works fine */
+    // I tried using a hash table but this was simpler and works fine 
     if (strcmp(str, "with") == 0)        { *out = TK_WITH;       return true; }
     if (strcmp(str, "parameters") == 0)  { *out = TK_PARAMETERS; return true; }
     if (strcmp(str, "end") == 0)         { *out = TK_END;        return true; }
@@ -173,51 +152,46 @@ static bool checkKeyword(const char *str, TokenType *out)
     return false;
 }
 
-/* ========================================================= */
-/*              DFA-BASED getNextToken                       */
-/* ========================================================= */
 
-/*
- * DFA states for the lexer state machine.
- * Named to roughly match what part of a token we're currently recognizing.
- */
-typedef enum {
+// DFA-BASED getNextToken
+
+typedef enum
+{
     ST_START,
 
-    /* identifiers */
-    ST_FIELD,           /* [a-z]+ (fieldid or keyword) */
-    ST_BD,              /* just saw [b-d], could be ID or fieldid */
-    ST_ID_AFTER_DIGIT,  /* saw [b-d][2-7], committed to ID */
-    ST_ID_BD,           /* in the [b-d]* middle part of ID */
-    ST_ID_TRAIL,        /* in the trailing [2-7]* part of ID */
+    // identifiers and keywords
+    ST_FIELD,          // [a-z]+ (keyword or field)
+    ST_BD,             // [b-d] prefix
+    ST_ID_AFTER_DIGIT, // committed to ID
+    ST_ID_BD,          // middle [b-d]*
+    ST_ID_TRAIL,       // trailing [2-7]*
 
-    /* function id:  _[a-zA-Z][a-zA-Z]*[0-9]* */
-    ST_FUNID_START,     /* saw _ */
-    ST_FUNID_ALPHA,     /* accumulating letters */
-    ST_FUNID_DIGIT,     /* accumulating trailing digits */
+    // Function IDs: _[a-zA-Z]*[0-9]*
+    ST_FUNID_START, 
+    ST_FUNID_ALPHA, 
+    ST_FUNID_DIGIT, 
 
-    /* record/union id:  #[a-z][a-z]* */
-    ST_RUID_START,      /* saw # */
-    ST_RUID,            /* accumulating lowercase letters */
+    // Record/Union IDs: #[a-z]*
+    ST_RUID_START, // '#'
+    ST_RUID,       // lowercase letters
 
-    /* numbers */
-    ST_NUM,             /* [0-9]+ */
-    ST_DOT,             /* saw digits then . */
-    ST_RNUM_D1,         /* first digit after decimal */
-    ST_RNUM_D2,         /* second digit after decimal (valid rnum) */
-    ST_EXP,             /* saw E after rnum */
-    ST_EXP_SIGN,        /* saw E then +/- */
-    ST_EXP_D1,          /* first exponent digit */
-    ST_EXP_D2,          /* second exponent digit (valid rnum) */
+    // Numbers & Exponents
+    ST_NUM,      // [0-9]+
+    ST_DOT,      // saw '.'
+    ST_RNUM_D1,  // first decimal digit
+    ST_RNUM_D2,  // second decimal digit
+    ST_EXP,      // E
+    ST_EXP_SIGN, // E followed by +/-
+    ST_EXP_D1,   // first exp digit
+    ST_EXP_D2,   // second exp digit
 
-    /* operators */
-    ST_LT,              /* saw < */
-    ST_ASSIGN1,         /* saw <- */
-    ST_ASSIGN2,         /* saw <-- */
-    ST_GT,              /* saw > */
+    // Operators & Assignment
+    ST_LT,      // '<'
+    ST_ASSIGN1, // '<-'
+    ST_ASSIGN2, // '<--'
+    ST_GT,      // '>'
 
-    /* comment */
-    ST_COMMENT,         /* inside % comment */
+    ST_COMMENT, // inside '%' comment
 
     ST_DONE
 } DFAState;
@@ -229,7 +203,7 @@ tokenInfo getNextToken(twinBuffer B)
     tk->lexeme[0] = '\0';
     tk->lineNo = lineNumber;
 
-    int len = 0;        /* current lexeme length */
+    int len = 0;        
     char c;
     DFAState state = ST_START;
 
@@ -238,11 +212,10 @@ tokenInfo getNextToken(twinBuffer B)
 
         switch (state) {
 
-        /* ============ START STATE ============ */
+        // START STATE 
         case ST_START:
-            /* skip whitespace */
             if (c == ' ' || c == '\t' || c == '\r') {
-                break;  /* stay in START */
+                break;  
             }
             if (c == '\n') {
                 lineNumber++;
@@ -255,10 +228,10 @@ tokenInfo getNextToken(twinBuffer B)
                 break;
             }
 
-            /* record the line where this token starts */
+            // recording the line where the token starts
             tk->lineNo = lineNumber;
 
-            /* ---- single character tokens ---- */
+            // SINGLE CHARACTER TOKENS
             switch (c) {
                 case '[':
                     tk->lexeme[0] = c; tk->lexeme[1] = '\0';
@@ -301,23 +274,23 @@ tokenInfo getNextToken(twinBuffer B)
                     tk->tokenType = TK_NOT; return tk;
             }
 
-            /* ---- multi-char operators handled inline ---- */
+            // MULTI CHARACTER OPERARTORS HANDLED INLINE
 
-            /* < : could be TK_LT, TK_LE, or TK_ASSIGNOP */
+            // < : could be TK_LT, TK_LE, or TK_ASSIGNOP 
             if (c == '<') {
                 tk->lexeme[len++] = c; tk->lexeme[len] = '\0';
                 state = ST_LT;
                 break;
             }
 
-            /* > : could be TK_GT or TK_GE */
+            // > : could be TK_GT or TK_GE
             if (c == '>') {
                 tk->lexeme[len++] = c; tk->lexeme[len] = '\0';
                 state = ST_GT;
                 break;
             }
 
-            /* == */
+            // == 
             if (c == '=') {
                 char n = getNextChar(B);
                 if (n == '=') {
@@ -325,9 +298,7 @@ tokenInfo getNextToken(twinBuffer B)
                     tk->tokenType = TK_EQ;
                     return tk;
                 } else {
-                    /* just '=' alone is not valid */
                     if (n != EOF) retractChar(B);
-                    /* report the '=' as unknown symbol */
                     printf("Line %d Error: Unknown Symbol <%c>\n", lineNumber, c);
                     tk->tokenType = TK_ERROR;
                     tk->lexeme[0] = c; tk->lexeme[1] = '\0';
@@ -336,7 +307,7 @@ tokenInfo getNextToken(twinBuffer B)
                 }
             }
 
-            /* != */
+            // != 
             if (c == '!') {
                 char n = getNextChar(B);
                 if (n == '=') {
@@ -353,7 +324,7 @@ tokenInfo getNextToken(twinBuffer B)
                 }
             }
 
-            /* &&& */
+            // &&& 
             if (c == '&') {
                 char n1 = getNextChar(B);
                 char n2 = getNextChar(B);
@@ -362,13 +333,10 @@ tokenInfo getNextToken(twinBuffer B)
                     tk->tokenType = TK_AND;
                     return tk;
                 }
-                /* error: programmer probably meant &&& */
                 if (n1 == '&') {
-                    /* consumed & and &, but n2 is wrong */
                     if (n2 != EOF) retractChar(B);
                     printf("Line %d Error: Unknown pattern <&&>\n", lineNumber);
                 } else {
-                    /* first & followed by non-& */
                     if (n2 != EOF) retractChar(B);
                     if (n1 != EOF) retractChar(B);
                     printf("Line %d Error: Unknown Symbol <%c>\n", lineNumber, c);
@@ -379,7 +347,7 @@ tokenInfo getNextToken(twinBuffer B)
                 break;
             }
 
-            /* @@@ */
+            // @@@ 
             if (c == '@') {
                 char n1 = getNextChar(B);
                 char n2 = getNextChar(B);
@@ -402,9 +370,8 @@ tokenInfo getNextToken(twinBuffer B)
                 break;
             }
 
-            /* % comment */
+            // % comment 
             if (c == '%') {
-                /* consume everything till newline */
                 while (c != '\n' && c != EOF) {
                     c = getNextChar(B);
                 }
@@ -414,44 +381,40 @@ tokenInfo getNextToken(twinBuffer B)
                 return tk;
             }
 
-            /* ---- DFA transitions for identifiers and numbers ---- */
 
-            /* digits -> number */
+            // DFA transitions for identifiers and numbers
+
             if (c >= '0' && c <= '9') {
                 tk->lexeme[len++] = c; tk->lexeme[len] = '\0';
                 state = ST_NUM;
                 break;
             }
 
-            /* b, c, d -> could be TK_ID or fieldid/keyword */
             if (c >= 'b' && c <= 'd') {
                 tk->lexeme[len++] = c; tk->lexeme[len] = '\0';
                 state = ST_BD;
                 break;
             }
 
-            /* other lowercase -> fieldid or keyword path */
             if (c >= 'a' && c <= 'z') {
                 tk->lexeme[len++] = c; tk->lexeme[len] = '\0';
                 state = ST_FIELD;
                 break;
             }
 
-            /* underscore -> function id */
             if (c == '_') {
                 tk->lexeme[len++] = c; tk->lexeme[len] = '\0';
                 state = ST_FUNID_START;
                 break;
             }
 
-            /* hash -> record/union id */
             if (c == '#') {
                 tk->lexeme[len++] = c; tk->lexeme[len] = '\0';
                 state = ST_RUID_START;
                 break;
             }
 
-            /* anything else is an unknown symbol */
+            // anything else is an unknown symbol 
             printf("Line %d Error: Unknown Symbol <%c>\n", lineNumber, c);
             tk->tokenType = TK_ERROR;
             tk->lexeme[0] = c; tk->lexeme[1] = '\0';
@@ -459,7 +422,7 @@ tokenInfo getNextToken(twinBuffer B)
             break;
 
 
-        /* ============ LESS THAN / ASSIGN ============ */
+        // LESS THAN / ASSIGN 
         case ST_LT:
             if (c == '=') {
                 tk->lexeme[len++] = c; tk->lexeme[len] = '\0';
@@ -471,27 +434,21 @@ tokenInfo getNextToken(twinBuffer B)
                 state = ST_ASSIGN1;
                 break;
             }
-            /* just < */
             retractChar(B);
             tk->tokenType = TK_LT;
             state = ST_DONE;
             break;
 
         case ST_ASSIGN1:
-            /* we have "<-" so far */
+            // we have "<-" 
             if (c == '-') {
                 tk->lexeme[len++] = c; tk->lexeme[len] = '\0';
                 state = ST_ASSIGN2;
                 break;
             }
-            /*
-             * "<-" is NOT an error. Double retraction:
-             * retract current char AND the '-', so we emit just '<' as TK_LT.
-             * The '-' will be picked up as TK_MINUS next time.
-             */
-            retractChar(B);     /* retract current char */
-            retractChar(B);     /* retract the '-' */
-            /* fix up the lexeme to just '<' */
+            // double retraction and getting less than token
+            retractChar(B);    
+            retractChar(B);      
             len = 1;
             tk->lexeme[1] = '\0';
             tk->tokenType = TK_LT;
@@ -499,13 +456,13 @@ tokenInfo getNextToken(twinBuffer B)
             break;
 
         case ST_ASSIGN2:
-            /* we have "<--" so far */
+            // we have "<--" 
             if (c == '-') {
                 tk->lexeme[len++] = c; tk->lexeme[len] = '\0';
                 tk->tokenType = TK_ASSIGNOP;
                 return tk;
             }
-            /* "<--" without third '-' is an error */
+            // <-- without third '-' is an error 
             retractChar(B);
             printf("Line %d Error: Unknown pattern <%s>\n", lineNumber, tk->lexeme);
             tk->tokenType = TK_ERROR;
@@ -513,7 +470,7 @@ tokenInfo getNextToken(twinBuffer B)
             break;
 
 
-        /* ============ GREATER THAN ============ */
+        // GREATER THAN 
         case ST_GT:
             if (c == '=') {
                 tk->lexeme[len++] = c; tk->lexeme[len] = '\0';
@@ -526,20 +483,18 @@ tokenInfo getNextToken(twinBuffer B)
             break;
 
 
-        /* ============ COMMENT ============ */
+        // COMMENT
         case ST_COMMENT:
-            /* shouldn't reach here, comment handled inline above */
             state = ST_DONE;
             break;
 
 
-        /* ============ FIELD ID / KEYWORD (lowercase letters) ============ */
+        //FIELD ID / KEYWORD (lowercase letters) 
         case ST_FIELD:
             if (c >= 'a' && c <= 'z') {
                 tk->lexeme[len++] = c; tk->lexeme[len] = '\0';
-                break; /* stay in ST_FIELD */
+                break; 
             }
-            /* end of lowercase run */
             retractChar(B);
             {
                 TokenType kw;
@@ -552,21 +507,20 @@ tokenInfo getNextToken(twinBuffer B)
             break;
 
 
-        /* ============ [b-d] START - could be ID or FIELDID ============ */
+        //[b-d] START - could be ID or FIELDID 
         case ST_BD:
             if (c >= '2' && c <= '7') {
-                /* confirmed TK_ID path: [b-d][2-7] */
+                // took TK_ID path: [b-d][2-7] 
                 tk->lexeme[len++] = c; tk->lexeme[len] = '\0';
                 state = ST_ID_AFTER_DIGIT;
                 break;
             }
             if (c >= 'a' && c <= 'z') {
-                /* went to fieldid/keyword path instead */
+                // went to fieldid/keyword path 
                 tk->lexeme[len++] = c; tk->lexeme[len] = '\0';
                 state = ST_FIELD;
                 break;
             }
-            /* single letter b/c/d followed by something else */
             retractChar(B);
             {
                 TokenType kw;
@@ -579,7 +533,6 @@ tokenInfo getNextToken(twinBuffer B)
             break;
 
         case ST_ID_AFTER_DIGIT:
-            /* we've seen [b-d][2-7], now in [b-d]* portion */
             if (c >= 'b' && c <= 'd') {
                 tk->lexeme[len++] = c; tk->lexeme[len] = '\0';
                 state = ST_ID_BD;
@@ -596,10 +549,9 @@ tokenInfo getNextToken(twinBuffer B)
             break;
 
         case ST_ID_BD:
-            /* in the [b-d]* middle section */
             if (c >= 'b' && c <= 'd') {
                 tk->lexeme[len++] = c; tk->lexeme[len] = '\0';
-                break; /* stay */
+                break; 
             }
             if (c >= '2' && c <= '7') {
                 tk->lexeme[len++] = c; tk->lexeme[len] = '\0';
@@ -612,10 +564,9 @@ tokenInfo getNextToken(twinBuffer B)
             break;
 
         case ST_ID_TRAIL:
-            /* trailing [2-7]* digits */
             if (c >= '2' && c <= '7') {
                 tk->lexeme[len++] = c; tk->lexeme[len] = '\0';
-                break; /* stay */
+                break;
             }
             retractChar(B);
             tk->tokenType = TK_ID;
@@ -623,15 +574,13 @@ tokenInfo getNextToken(twinBuffer B)
             break;
 
 
-        /* ============ FUNCTION ID: _[a-zA-Z][a-zA-Z]*[0-9]* ============ */
+        //FUNCTION ID: _[a-zA-Z][a-zA-Z]*[0-9]* 
         case ST_FUNID_START:
-            /* need at least one letter after _ */
             if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')) {
                 tk->lexeme[len++] = c; tk->lexeme[len] = '\0';
                 state = ST_FUNID_ALPHA;
                 break;
             }
-            /* underscore followed by non-letter is an error */
             retractChar(B);
             printf("Line %d Error: Unknown Symbol <%c>\n", lineNumber, '_');
             tk->tokenType = TK_ERROR;
@@ -641,7 +590,7 @@ tokenInfo getNextToken(twinBuffer B)
         case ST_FUNID_ALPHA:
             if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')) {
                 tk->lexeme[len++] = c; tk->lexeme[len] = '\0';
-                break; /* stay in alpha */
+                break; 
             }
             if (c >= '0' && c <= '9') {
                 tk->lexeme[len++] = c; tk->lexeme[len] = '\0';
@@ -649,7 +598,6 @@ tokenInfo getNextToken(twinBuffer B)
                 break;
             }
             retractChar(B);
-            /* check if it's _main */
             if (strcmp(tk->lexeme, "_main") == 0)
                 tk->tokenType = TK_MAIN;
             else
@@ -660,10 +608,9 @@ tokenInfo getNextToken(twinBuffer B)
         case ST_FUNID_DIGIT:
             if (c >= '0' && c <= '9') {
                 tk->lexeme[len++] = c; tk->lexeme[len] = '\0';
-                break; /* stay */
+                break; 
             }
             retractChar(B);
-            /* _main can't end in digits but check anyway just in case */
             if (strcmp(tk->lexeme, "_main") == 0)
                 tk->tokenType = TK_MAIN;
             else
@@ -672,14 +619,13 @@ tokenInfo getNextToken(twinBuffer B)
             break;
 
 
-        /* ============ RECORD/UNION ID: #[a-z][a-z]* ============ */
+        // RECORD/UNION ID: #[a-z][a-z]*
         case ST_RUID_START:
             if (c >= 'a' && c <= 'z') {
                 tk->lexeme[len++] = c; tk->lexeme[len] = '\0';
                 state = ST_RUID;
                 break;
             }
-            /* # followed by non-lowercase is error */
             retractChar(B);
             printf("Line %d Error: Unknown Symbol <%c>\n", lineNumber, '#');
             tk->tokenType = TK_ERROR;
@@ -697,54 +643,46 @@ tokenInfo getNextToken(twinBuffer B)
             break;
 
 
-        /* ============ NUMBERS ============ */
+        // NUMBERS 
         case ST_NUM:
             if (c >= '0' && c <= '9') {
                 tk->lexeme[len++] = c; tk->lexeme[len] = '\0';
                 break;
             }
             if (c == '.') {
-                /* might be start of real number */
                 tk->lexeme[len++] = c; tk->lexeme[len] = '\0';
                 state = ST_DOT;
                 break;
             }
-            /* end of integer */
             retractChar(B);
             tk->tokenType = TK_NUM;
             state = ST_DONE;
             break;
 
         case ST_DOT:
-            /* just saw '.' after integer digits */
+            // decimal after integer digits
             if (c >= '0' && c <= '9') {
-                /* first digit after decimal, committed to rnum attempt */
+                // first digit after decimal accept
                 tk->lexeme[len++] = c; tk->lexeme[len] = '\0';
                 state = ST_RNUM_D1;
                 break;
             }
-            /*
-             * Not a digit after '.': e.g. "23.abc" -> "23." is TK_ERROR,
-             * then "abc" will be tokenized as TK_FIELDID on the next call.
-             */
-            retractChar(B);     /* retract current non-digit */
+            
+             // Not a digit after '.'. As corrected in announcements for 23.abc -> "23." is TK_ERROR
+            retractChar(B);     // retract current non-digit
             printf("Line %d Error: Unknown pattern <%s>\n", lineNumber, tk->lexeme);
             tk->tokenType = TK_ERROR;
             state = ST_DONE;
             break;
 
         case ST_RNUM_D1:
-            /* have one digit after decimal, need exactly one more */
+            //one digit after decimal
             if (c >= '0' && c <= '9') {
                 tk->lexeme[len++] = c; tk->lexeme[len] = '\0';
                 state = ST_RNUM_D2;
                 break;
             }
-            /*
-             * Only one digit after decimal - error!
-             * e.g. "123.5" is reported as unknown pattern.
-             * Retract the current char so it can be processed next.
-             */
+            // Only one digit after decimal - error
             retractChar(B);
             printf("Line %d Error: Unknown pattern <%s>\n", lineNumber, tk->lexeme);
             tk->tokenType = TK_ERROR;
@@ -752,20 +690,17 @@ tokenInfo getNextToken(twinBuffer B)
             break;
 
         case ST_RNUM_D2:
-            /* have two digits after decimal, valid rnum so far */
             if (c == 'E') {
                 tk->lexeme[len++] = c; tk->lexeme[len] = '\0';
                 state = ST_EXP;
                 break;
             }
-            /* valid rnum without exponent */
             retractChar(B);
             tk->tokenType = TK_RNUM;
             state = ST_DONE;
             break;
 
         case ST_EXP:
-            /* just saw E after rnum base */
             if (c == '+' || c == '-') {
                 tk->lexeme[len++] = c; tk->lexeme[len] = '\0';
                 state = ST_EXP_SIGN;
@@ -776,7 +711,6 @@ tokenInfo getNextToken(twinBuffer B)
                 state = ST_EXP_D1;
                 break;
             }
-            /* E not followed by sign or digit - error */
             retractChar(B);
             printf("Line %d Error: Unknown pattern <%s>\n", lineNumber, tk->lexeme);
             tk->tokenType = TK_ERROR;
@@ -784,13 +718,11 @@ tokenInfo getNextToken(twinBuffer B)
             break;
 
         case ST_EXP_SIGN:
-            /* saw E then +/- */
             if (c >= '0' && c <= '9') {
                 tk->lexeme[len++] = c; tk->lexeme[len] = '\0';
                 state = ST_EXP_D1;
                 break;
             }
-            /* E+/- not followed by digit - error */
             retractChar(B);
             printf("Line %d Error: Unknown pattern <%s>\n", lineNumber, tk->lexeme);
             tk->tokenType = TK_ERROR;
@@ -798,14 +730,11 @@ tokenInfo getNextToken(twinBuffer B)
             break;
 
         case ST_EXP_D1:
-            /* first exponent digit, need exactly one more */
             if (c >= '0' && c <= '9') {
-                /* got second exponent digit - complete rnum! */
                 tk->lexeme[len++] = c; tk->lexeme[len] = '\0';
                 state = ST_EXP_D2;
                 break;
             }
-            /* only one digit in exponent - error */
             retractChar(B);
             printf("Line %d Error: Unknown pattern <%s>\n", lineNumber, tk->lexeme);
             tk->tokenType = TK_ERROR;
@@ -813,7 +742,6 @@ tokenInfo getNextToken(twinBuffer B)
             break;
 
         case ST_EXP_D2:
-            /* we have complete rnum with 2 exponent digits */
             retractChar(B);
             tk->tokenType = TK_RNUM;
             state = ST_DONE;
@@ -821,15 +749,13 @@ tokenInfo getNextToken(twinBuffer B)
 
 
         default:
-            /* shouldn't get here */
-            // printf("DEBUG: hit default state??\n");
             tk->tokenType = TK_ERROR;
             state = ST_DONE;
             break;
         }
     }
 
-    /* handle identifier length limits */
+    // handling identifier length limits 
     if (tk->tokenType == TK_ID && (int)strlen(tk->lexeme) > 20) {
         printf("Line %d Error :Variable Identifier is longer than the prescribed length of 20 characters.\n", tk->lineNo);
         tk->tokenType = TK_ERROR;
@@ -844,9 +770,7 @@ tokenInfo getNextToken(twinBuffer B)
 }
 
 
-/* ========================================================= */
-/*                 REMOVE COMMENTS                           */
-/* ========================================================= */
+// REMOVE COMMENTS
 
 void removeComments(char *testcaseFile, char *cleanFile)
 {
@@ -862,10 +786,8 @@ void removeComments(char *testcaseFile, char *cleanFile)
     int ch = fgetc(src);
     while (ch != EOF) {
         if (ch == '%') {
-            /* skip till end of line */
             while (ch != '\n' && ch != EOF)
                 ch = fgetc(src);
-            /* preserve the newline to keep line numbers consistent */
             if (ch == '\n') {
                 fputc('\n', dst);
                 ch = fgetc(src);

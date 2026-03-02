@@ -4,12 +4,11 @@
 #include <stdio.h>
 #include <stdbool.h>
 
-/* buffer size as suggested in announcements (50 bytes each half) */
+// buffer size as suggested in announcements - 50 bytes each
 #define BUFFER_SIZE 50
 #define MAX_LEXEME_SIZE 128
 
-/* ================= TOKEN TYPES ================= */
-
+//TOKEN TYPES
 typedef enum
 {
     TK_ASSIGNOP,
@@ -73,7 +72,6 @@ typedef enum
     TK_EOF
 } TokenType;
 
-/* ================= TOKEN INFO STRUCT ================= */
 
 typedef struct token_info
 {
@@ -84,14 +82,13 @@ typedef struct token_info
 
 typedef token_info *tokenInfo;
 
-/* ================= TWIN BUFFER ================= */
 
 typedef struct TwinBufferStruct
 {
     FILE *fp;
     char buf1[BUFFER_SIZE];
     char buf2[BUFFER_SIZE];
-    int currentBuff; /* 1 or 2 */
+    int currentBuff;
     int forward;
     int bytesRead1;
     int bytesRead2;
