@@ -1,5 +1,4 @@
 %Test Case 7: Syntactically correct testcase with iterative computations
-%Uses identifier patterns consistent with provided valid samples.
 
 _sumAndScale input parameter list[int b5, int b6]
 output parameter list[int b3, int b4];
