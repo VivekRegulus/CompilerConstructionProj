@@ -1,5 +1,4 @@
 %Test Case 8: Syntactically correct testcase using records and conditionals
-%Uses identifier patterns consistent with provided valid samples.
 
 _updatePoint input parameter list[record #point d5, int b5]
 output parameter list[record #point d6];
