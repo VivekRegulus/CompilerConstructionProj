@@ -158,7 +158,7 @@ int main(int argc, char *argv[])
             start_time = clock();
             
             // Invoke Lexer and Parser
-            parseTree PT = parseInputSourceCode(argv[1], T);
+            parseInputSourceCode(argv[1], T);
             
             // End Timer
             end_time = clock();
